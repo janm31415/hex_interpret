@@ -328,18 +328,20 @@ std::string dump_type_to_str(dumptype dt)
 void print_help()
 {
   std::cout << "Available commands:\n";
-  std::cout << "  d, dump       : dump the interpreted hex data\n";
-  std::cout << "  offset <nr>   : change the dump offset to nr\n";
-  std::cout << "  length <nr>   : change the dump length to nr\n";
-  std::cout << "  row <nr>      : change the row length to nr\n";
+  std::cout << "  d, dump         : dump the interpreted hex data\n";
+  std::cout << "  offset <nr>     : change the dump offset to nr\n";
+  std::cout << "  length <nr>     : change the dump length to nr\n";
+  std::cout << "  row <nr>        : change the row length to nr\n";
   std::cout << "  type b|B|h|H|i|I|q|Q|f|d\n";
-  std::cout << "                : change the interpreted type\n";
-  std::cout << "  little        : interpret as little endianness\n";
-  std::cout << "  big           : interpret as big endianness\n";
-  std::cout << "  endianness    : shows this PCs endianness\n";
-  std::cout << "  state         : print the current dump state\n";
-  std::cout << "  >> <file>     : stream output to a file\n";
-  std::cout << "  q, quit, exit : quit the application\n";
+  std::cout << "                  : change the interpreted type\n";
+  std::cout << "  find <str>      : find next occurrence of str\n";
+  std::cout << "  find# <hex str> : find next occurrence of hex ?str\n";
+  std::cout << "  little          : interpret as little endianness\n";
+  std::cout << "  big             : interpret as big endianness\n";
+  std::cout << "  endianness      : shows this PCs endianness\n";
+  std::cout << "  state           : print the current dump state\n";
+  std::cout << "  >> <file>       : stream output to a file\n";
+  std::cout << "  q, quit, exit   : quit the application\n";
 }
 
 int count_connectors(std::string temp)
@@ -430,6 +432,67 @@ dumptype interpret_dumptype(const std::string& s)
     return dumptype::dumptype_double;
   return dumptype::dumptype_uint8;
   }
+  
+void find_next_occurence(uint32_t& offset, const std::vector<uint8_t>& byte_arr, const std::string& s, bool string_is_hex)
+  {
+  std::vector<uint8_t> find_arr;
+  if (string_is_hex)
+    find_arr = hex_to_byte_array(s);
+  else
+    {
+    find_arr.reserve(s.size());
+    for (const auto ch : s)
+      find_arr.push_back((uint8_t)ch);
+    }
+  if (find_arr.empty())
+    {
+    std::cout << "Nothing to find.\n";
+    return;
+    }
+  uint32_t current_matched_index = 0;
+  for (uint32_t i = offset; i < byte_arr.size(); ++i)
+    {
+    if (byte_arr[i] == find_arr[current_matched_index])
+      {
+      ++current_matched_index;
+      if (current_matched_index >= find_arr.size())
+        {
+        uint32_t pos = i + 1 - current_matched_index;
+        std::cout << "Found next occurence at position 0x" << int_to_hex(pos) << ".\n";
+        offset = pos;
+        std::cout << "Setting offset to " << offset << "(0x" << int_to_hex(offset) << ").\n";
+        return;
+        }
+      }
+    else
+      {
+      current_matched_index = 0;
+      }
+    }
+  uint32_t end_of_find = offset+find_arr.size();
+  if (end_of_find > byte_arr.size())
+    end_of_find = byte_arr.size();
+  for (uint32_t i = 0; i < end_of_find; ++i)
+    {
+    if (byte_arr[i] == find_arr[current_matched_index])
+      {
+      ++current_matched_index;
+      if (current_matched_index >= find_arr.size())
+        {
+        uint32_t pos = i + 1 - current_matched_index;
+        std::cout << "Found next occurence at position 0x" << int_to_hex(pos) << ".\n";
+        offset = pos;
+        std::cout << "Setting offset to " << offset << "(0x" << int_to_hex(offset) << ").\n";
+        return;
+        }
+      }
+    else
+      {
+      current_matched_index = 0;
+      }
+    }
+  std::cout << "Found no occurrence.\n";
+  }
 
 void hex_interpret(const std::vector<uint8_t>& byte_arr)
 {
@@ -478,6 +541,16 @@ void hex_interpret(const std::vector<uint8_t>& byte_arr)
         ++i;
         data_per_line = interpret_number(arguments[i]);
         std::cout << data_per_line << " interpreted values will be printed per row.\n";
+      }
+      else if (arguments[i] == "find" && (i < (argc - 1)))
+      {
+        ++i;
+        find_next_occurence(offset, byte_arr, arguments[i], false);
+      }
+      else if (arguments[i] == "find#" && (i < (argc - 1)))
+      {
+        ++i;
+        find_next_occurence(offset, byte_arr, arguments[i], true);
       }
       else if (arguments[i] == ">>" && (i < (argc - 1)))
       {

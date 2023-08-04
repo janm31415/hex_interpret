@@ -450,7 +450,7 @@ void find_next_occurence(uint32_t& offset, const std::vector<uint8_t>& byte_arr,
     return;
     }
   uint32_t current_matched_index = 0;
-  for (uint32_t i = offset; i < byte_arr.size(); ++i)
+  for (uint32_t i = offset+1; i < (uint32_t)byte_arr.size(); ++i)
     {
     if (byte_arr[i] == find_arr[current_matched_index])
       {
@@ -469,9 +469,9 @@ void find_next_occurence(uint32_t& offset, const std::vector<uint8_t>& byte_arr,
       current_matched_index = 0;
       }
     }
-  uint32_t end_of_find = offset+find_arr.size();
-  if (end_of_find > byte_arr.size())
-    end_of_find = byte_arr.size();
+  uint32_t end_of_find = offset+(uint32_t)find_arr.size();
+  if (end_of_find > (uint32_t)byte_arr.size())
+    end_of_find = (uint32_t)byte_arr.size();
   for (uint32_t i = 0; i < end_of_find; ++i)
     {
     if (byte_arr[i] == find_arr[current_matched_index])
@@ -524,24 +524,40 @@ void hex_interpret(const std::vector<uint8_t>& byte_arr)
         offset = interpret_number(arguments[i]);
         std::cout << "Setting offset to " << offset << "(0x" << int_to_hex(offset) << ").\n";
       }
+      else if (arguments[i] == "offset")
+        {
+        std::cout << "The offset equals " << offset << "(0x" << int_to_hex(offset) << ").\n";
+        }
       else if (arguments[i] == "length" && (i < (argc - 1)))
       {
         ++i;
         length = interpret_number(arguments[i]);
         std::cout << "Setting length to " << length << "(0x" << int_to_hex(length) << ").\n";
       }
+      else if (arguments[i] == "length")
+        {
+        std::cout << "The length equals " << offset << "(0x" << int_to_hex(offset) << ").\n";
+        }
       else if (arguments[i] == "type" && (i < (argc - 1)))
       {
         ++i;
         dump_type = interpret_dumptype(arguments[i]);
         std::cout << "Interpreting the bytes as " << dump_type_to_str(dump_type) << ".\n";
       }
+      else if (arguments[i] == "type")
+        {
+        std::cout << "The type equals " << dump_type_to_str(dump_type) << ".\n";
+        }
       else if (arguments[i] == "row" && (i < (argc - 1)))
       {
         ++i;
         data_per_line = interpret_number(arguments[i]);
         std::cout << data_per_line << " interpreted values will be printed per row.\n";
       }
+      else if (arguments[i] == "row")
+        {
+        std::cout << data_per_line << " interpreted values will be printed per row.\n";
+        }
       else if (arguments[i] == "find" && (i < (argc - 1)))
       {
         ++i;

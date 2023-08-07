@@ -536,7 +536,7 @@ void hex_interpret(const std::vector<uint8_t>& byte_arr)
       }
       else if (arguments[i] == "length")
         {
-        std::cout << "The length equals " << offset << "(0x" << int_to_hex(offset) << ").\n";
+        std::cout << "The length equals " << length << "(0x" << int_to_hex(length) << ").\n";
         }
       else if (arguments[i] == "type" && (i < (argc - 1)))
       {

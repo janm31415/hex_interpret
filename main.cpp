@@ -332,6 +332,8 @@ void print_help()
   std::cout << "  offset <nr>     : change the dump offset to nr\n";
   std::cout << "  length <nr>     : change the dump length to nr\n";
   std::cout << "  row <nr>        : change the row length to nr\n";
+  std::cout << "  + <nr>          : add nr to the offset\n";
+  std::cout << "  - <nr>          : subtract nr from the offset\n";
   std::cout << "  type b|B|h|H|i|I|q|Q|f|d\n";
   std::cout << "                  : change the interpreted type\n";
   std::cout << "  find <str>      : find next occurrence of str\n";
@@ -567,6 +569,32 @@ void hex_interpret(const std::vector<uint8_t>& byte_arr)
       {
         ++i;
         find_next_occurence(offset, byte_arr, arguments[i], true);
+      }
+      else if (arguments[i] == "+" && (i < (argc - 1)))
+      {
+        ++i;
+        offset += interpret_number(arguments[i]);
+        std::cout << "Setting offset to " << offset << "(0x" << int_to_hex(offset) << ").\n";
+      }
+      else if (arguments[i].find("+") == 0)
+      {
+        arguments[i].erase(arguments[i].begin(), arguments[i].begin() + 1);
+        offset += interpret_number(arguments[i]);
+        std::cout << "Setting offset to " << offset << "(0x" << int_to_hex(offset) << ").\n";
+      }
+      else if (arguments[i] == "-" && (i < (argc - 1)))
+      {
+        ++i;
+        uint32_t subtract = interpret_number(arguments[i]);
+        offset = subtract > offset ? 0 : offset-subtract;
+        std::cout << "Setting offset to " << offset << "(0x" << int_to_hex(offset) << ").\n";
+      }
+      else if (arguments[i].find("-") == 0)
+      {
+        arguments[i].erase(arguments[i].begin(), arguments[i].begin() + 1);
+        uint32_t subtract = interpret_number(arguments[i]);
+        offset = subtract > offset ? 0 : offset-subtract;
+        std::cout << "Setting offset to " << offset << "(0x" << int_to_hex(offset) << ").\n";
       }
       else if (arguments[i] == ">>" && (i < (argc - 1)))
       {

@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iterator>
 #include <sstream>
+#include <cassert>
 
 bool is_little_endian()
 {
@@ -11,6 +12,28 @@ bool is_little_endian()
   char *num_ptr = (char*)&number;
   return (num_ptr[0] == 1);
 }
+
+enum class dumptype
+{
+  dumptype_uint8,
+  dumptype_int8,
+  dumptype_uint16,
+  dumptype_int16,
+  dumptype_uint32,
+  dumptype_int32,
+  dumptype_uint64,
+  dumptype_int64,
+  dumptype_float,
+  dumptype_double
+};
+
+struct hex_state {
+  bool little_endiann = is_little_endian();
+  uint32_t offset = 0;
+  uint32_t length = 0xffffffff;
+  dumptype dump_type = dumptype::dumptype_uint8;
+  uint32_t data_per_line = 16;
+};
 
 std::string int_to_hex(uint8_t i)
 {
@@ -171,6 +194,9 @@ template <class T>
 class TypeInterpreter
 {
 public:
+
+  typedef T value_type;
+
   TypeInterpreter(bool little_endiann = true) : _little_endiann(little_endiann) {}
   
   void operator()(const std::vector<uint8_t>& characters, std::ostream& str)
@@ -203,6 +229,51 @@ public:
       }
       const T val = *reinterpret_cast<T*>(&number);
       output<T>(str, val);
+    }
+  }
+  
+  bool _little_endiann;
+};
+
+template <class T>
+class TypeInterpreterToVector
+{
+public:
+
+  typedef T value_type;
+
+  TypeInterpreterToVector(bool little_endiann = true) : _little_endiann(little_endiann) {}
+  
+  void operator()(const std::vector<uint8_t>& characters, std::vector<T>& data)
+  {
+    assert(sizeof(T) <= 8);
+    auto it = characters.begin();
+    const auto it_end = characters.end();
+    while (it != it_end)
+    {
+      std::vector<uint64_t> values;
+      for (int i = 0; i < sizeof(T); ++i)
+      {
+        if (it != it_end)
+          values.push_back(*it++);
+      }
+      uint64_t number = 0;
+      if (_little_endiann)
+      {
+        for (auto rit = values.rbegin(); rit != values.rend(); ++rit)
+        {
+          number = (number << 8) | *rit;
+        }
+      }
+      else
+      {
+        for (auto rit = values.begin(); rit != values.end(); ++rit)
+        {
+          number = (number << 8) | *rit;
+        }
+      }
+      const T val = *reinterpret_cast<T*>(&number);
+      data.push_back(val);
     }
   }
   
@@ -256,20 +327,6 @@ std::vector<uint8_t> read_input(const std::string& input)
     return hex_to_byte_array(input);
   }
 }
-
-enum class dumptype
-{
-  dumptype_uint8,
-  dumptype_int8,
-  dumptype_uint16,
-  dumptype_int16,
-  dumptype_uint32,
-  dumptype_int32,
-  dumptype_uint64,
-  dumptype_int64,
-  dumptype_float,
-  dumptype_double
-};
 
 uint32_t size_of(dumptype dt)
 {
@@ -337,7 +394,11 @@ void print_help()
   std::cout << "  type b|B|h|H|i|I|q|Q|f|d\n";
   std::cout << "                  : change the interpreted type\n";
   std::cout << "  find <str>      : find next occurrence of str\n";
-  std::cout << "  find# <hex str> : find next occurrence of hex ?str\n";
+  std::cout << "  find# <hex str> : find next occurrence of hex str\n";
+  std::cout << "  clamp min max length\n";
+  std::cout << "                  : find streak of minimum size\n";
+  std::cout << "                    length where each element is\n";
+  std::cout << "                    in the interval [min, max]\n";
   std::cout << "  little          : interpret as little endianness\n";
   std::cout << "  big             : interpret as big endianness\n";
   std::cout << "  endianness      : shows this PCs endianness\n";
@@ -390,6 +451,23 @@ std::vector<std::string> get_arguments(const std::string& command)
   return output;
 }
 
+double interpret_double(const std::string& s) {
+    std::stringstream sstr;
+    sstr << s;
+    double x;
+    sstr >> x;
+    return x;
+}
+
+template <class T>
+T interpret_number(const std::string& s) {
+    std::stringstream sstr;
+    sstr << s;
+    T x;
+    sstr >> x;
+    return x;
+}
+
 uint32_t interpret_number(const std::string& s)
   {
   if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) // hex number
@@ -434,6 +512,77 @@ dumptype interpret_dumptype(const std::string& s)
     return dumptype::dumptype_double;
   return dumptype::dumptype_uint8;
   }
+
+template <class TInterpreter>
+void find_clamp(uint32_t& offset, const std::vector<uint8_t>& byte_arr, const std::string& minimum_str, const std::string& maximum_str, uint32_t length, TInterpreter interpreter) {
+  typename TInterpreter::value_type minimum = interpret_number<typename TInterpreter::value_type>(minimum_str);
+  typename TInterpreter::value_type maximum = interpret_number<typename TInterpreter::value_type>(maximum_str);
+  std::cout << "Looking for clamp of length " << length << " where data is in the interval [" << minimum << ", " << maximum << "]\n";
+  std::vector<uint8_t> characters;
+  std::vector<typename TInterpreter::value_type> values;
+  for (uint32_t i = offset+1; i < (uint32_t)byte_arr.size(); ++i)
+    {
+    values.clear();
+    size_t type_size = sizeof(typename TInterpreter::value_type);
+    size_t current_offset = i;
+    bool values_vector_is_correctly_clamped = true;
+    while (values_vector_is_correctly_clamped) {
+      characters.clear();
+      if (current_offset+type_size < byte_arr.size()) {
+        for (size_t j = 0; j < type_size; ++j) {
+          characters.push_back(byte_arr[current_offset+j]);
+          }
+        interpreter(characters, values);
+        values_vector_is_correctly_clamped = values.back() >= minimum && values.back() <= maximum;
+        if (!values_vector_is_correctly_clamped)
+          values.pop_back();
+        current_offset += type_size;
+      } else
+        values_vector_is_correctly_clamped = false;
+    }
+    if (values.size() >= length) {
+      std::cout << "A valid offset has been found\n";
+      offset = i;
+      return;
+    }
+  }
+}
+  
+void find_clamp(uint32_t& offset, const std::vector<uint8_t>& byte_arr, const std::string& minimum_str, const std::string& maximum_str, const std::string& length_str, hex_state& state) {
+  uint32_t length = interpret_number(length_str);
+  switch (state.dump_type) {
+    case dumptype::dumptype_uint8:
+      find_clamp(state.offset, byte_arr, minimum_str, maximum_str, length, TypeInterpreterToVector<uint8_t>(state.little_endiann));
+      break;
+    case dumptype::dumptype_int8:
+      find_clamp(state.offset, byte_arr, minimum_str, maximum_str, length, TypeInterpreterToVector<int8_t>(state.little_endiann));
+      break;
+    case dumptype::dumptype_uint16:
+      find_clamp(state.offset, byte_arr, minimum_str, maximum_str, length, TypeInterpreterToVector<uint16_t>(state.little_endiann));
+      break;
+    case dumptype::dumptype_int16:
+      find_clamp(state.offset, byte_arr, minimum_str, maximum_str, length, TypeInterpreterToVector<int16_t>(state.little_endiann));
+      break;
+    case dumptype::dumptype_uint32:
+      find_clamp(state.offset, byte_arr, minimum_str, maximum_str, length, TypeInterpreterToVector<uint32_t>(state.little_endiann));
+      break;
+    case dumptype::dumptype_int32:
+      find_clamp(state.offset, byte_arr, minimum_str, maximum_str, length, TypeInterpreterToVector<int32_t>(state.little_endiann));
+      break;
+    case dumptype::dumptype_uint64:
+      find_clamp(state.offset, byte_arr, minimum_str, maximum_str, length, TypeInterpreterToVector<uint64_t>(state.little_endiann));
+      break;
+    case dumptype::dumptype_int64:
+      find_clamp(state.offset, byte_arr, minimum_str, maximum_str, length, TypeInterpreterToVector<int64_t>(state.little_endiann));
+      break;
+    case dumptype::dumptype_float:
+      find_clamp(state.offset, byte_arr, minimum_str, maximum_str, length, TypeInterpreterToVector<float>(state.little_endiann));
+      break;
+    case dumptype::dumptype_double:
+      find_clamp(state.offset, byte_arr, minimum_str, maximum_str, length, TypeInterpreterToVector<double>(state.little_endiann));
+      break;
+  }
+}
   
 void find_next_occurence(uint32_t& offset, const std::vector<uint8_t>& byte_arr, const std::string& s, bool string_is_hex)
   {
@@ -496,14 +645,11 @@ void find_next_occurence(uint32_t& offset, const std::vector<uint8_t>& byte_arr,
   std::cout << "Found no occurrence.\n";
   }
 
+
 void hex_interpret(const std::vector<uint8_t>& byte_arr)
 {
   std::string command;
-  bool little_endiann = is_little_endian();
-  uint32_t offset = 0;
-  uint32_t length = 0xffffffff;
-  dumptype dump_type = dumptype::dumptype_uint8;
-  uint32_t data_per_line = 16;
+  hex_state state;
   while (command != "exit" && command != "quit" && command != "q")
   {
     std::cout << "> ";
@@ -517,84 +663,88 @@ void hex_interpret(const std::vector<uint8_t>& byte_arr)
       if (arguments[i] == "help" || arguments[i] == "?" || arguments[i] == "-?")
         print_help();
       else if (arguments[i] == "little")
-        little_endiann = true;
+        state.little_endiann = true;
       else if (arguments[i] == "big")
-        little_endiann = false;
+        state.little_endiann = false;
       else if (arguments[i] == "offset" && (i < (argc - 1)))
       {
         ++i;
-        offset = interpret_number(arguments[i]);
-        std::cout << "Setting offset to " << offset << "(0x" << int_to_hex(offset) << ").\n";
+        state.offset = interpret_number(arguments[i]);
+        std::cout << "Setting offset to " << state.offset << "(0x" << int_to_hex(state.offset) << ").\n";
       }
       else if (arguments[i] == "offset")
         {
-        std::cout << "The offset equals " << offset << "(0x" << int_to_hex(offset) << ").\n";
+        std::cout << "The offset equals " << state.offset << "(0x" << int_to_hex(state.offset) << ").\n";
         }
       else if (arguments[i] == "length" && (i < (argc - 1)))
       {
         ++i;
-        length = interpret_number(arguments[i]);
-        std::cout << "Setting length to " << length << "(0x" << int_to_hex(length) << ").\n";
+        state.length = interpret_number(arguments[i]);
+        std::cout << "Setting length to " << state.length << "(0x" << int_to_hex(state.length) << ").\n";
       }
       else if (arguments[i] == "length")
         {
-        std::cout << "The length equals " << length << "(0x" << int_to_hex(length) << ").\n";
+        std::cout << "The length equals " << state.length << "(0x" << int_to_hex(state.length) << ").\n";
         }
       else if (arguments[i] == "type" && (i < (argc - 1)))
       {
         ++i;
-        dump_type = interpret_dumptype(arguments[i]);
-        std::cout << "Interpreting the bytes as " << dump_type_to_str(dump_type) << ".\n";
+        state.dump_type = interpret_dumptype(arguments[i]);
+        std::cout << "Interpreting the bytes as " << dump_type_to_str(state.dump_type) << ".\n";
       }
       else if (arguments[i] == "type")
         {
-        std::cout << "The type equals " << dump_type_to_str(dump_type) << ".\n";
+        std::cout << "The type equals " << dump_type_to_str(state.dump_type) << ".\n";
         }
       else if (arguments[i] == "row" && (i < (argc - 1)))
       {
         ++i;
-        data_per_line = interpret_number(arguments[i]);
-        std::cout << data_per_line << " interpreted values will be printed per row.\n";
+        state.data_per_line = interpret_number(arguments[i]);
+        std::cout << state.data_per_line << " interpreted values will be printed per row.\n";
       }
       else if (arguments[i] == "row")
         {
-        std::cout << data_per_line << " interpreted values will be printed per row.\n";
+        std::cout << state.data_per_line << " interpreted values will be printed per row.\n";
         }
       else if (arguments[i] == "find" && (i < (argc - 1)))
       {
         ++i;
-        find_next_occurence(offset, byte_arr, arguments[i], false);
+        find_next_occurence(state.offset, byte_arr, arguments[i], false);
       }
       else if (arguments[i] == "find#" && (i < (argc - 1)))
       {
         ++i;
-        find_next_occurence(offset, byte_arr, arguments[i], true);
+        find_next_occurence(state.offset, byte_arr, arguments[i], true);
+      }
+      else if (arguments[i] == "clamp" && (i < (argc - 3))) {
+        find_clamp(state.offset, byte_arr, arguments[i+1], arguments[i+2], arguments[i+3], state);
+        i += 3;
       }
       else if (arguments[i] == "+" && (i < (argc - 1)))
       {
         ++i;
-        offset += interpret_number(arguments[i]);
-        std::cout << "Setting offset to " << offset << "(0x" << int_to_hex(offset) << ").\n";
+        state.offset += interpret_number(arguments[i]);
+        std::cout << "Setting offset to " << state.offset << "(0x" << int_to_hex(state.offset) << ").\n";
       }
       else if (arguments[i].find("+") == 0)
       {
         arguments[i].erase(arguments[i].begin(), arguments[i].begin() + 1);
-        offset += interpret_number(arguments[i]);
-        std::cout << "Setting offset to " << offset << "(0x" << int_to_hex(offset) << ").\n";
+        state.offset += interpret_number(arguments[i]);
+        std::cout << "Setting offset to " << state.offset << "(0x" << int_to_hex(state.offset) << ").\n";
       }
       else if (arguments[i] == "-" && (i < (argc - 1)))
       {
         ++i;
         uint32_t subtract = interpret_number(arguments[i]);
-        offset = subtract > offset ? 0 : offset-subtract;
-        std::cout << "Setting offset to " << offset << "(0x" << int_to_hex(offset) << ").\n";
+        state.offset = subtract > state.offset ? 0 : state.offset-subtract;
+        std::cout << "Setting offset to " << state.offset << "(0x" << int_to_hex(state.offset) << ").\n";
       }
       else if (arguments[i].find("-") == 0)
       {
         arguments[i].erase(arguments[i].begin(), arguments[i].begin() + 1);
         uint32_t subtract = interpret_number(arguments[i]);
-        offset = subtract > offset ? 0 : offset-subtract;
-        std::cout << "Setting offset to " << offset << "(0x" << int_to_hex(offset) << ").\n";
+        state.offset = subtract > state.offset ? 0 : state.offset-subtract;
+        std::cout << "Setting offset to " << state.offset << "(0x" << int_to_hex(state.offset) << ").\n";
       }
       else if (arguments[i] == ">>" && (i < (argc - 1)))
       {
@@ -615,17 +765,17 @@ void hex_interpret(const std::vector<uint8_t>& byte_arr)
       }
       else if (arguments[i] == "state")
       {
-        if (little_endiann)
+        if (state.little_endiann)
           std::cout << "I interpret data as little-endian.\n";
         else
           std::cout << "I interpret data as big-endian.\n";
-        std::cout << "A dump will start at offset " << offset << "(0x" << int_to_hex(offset) << ").\n";
-        if (length == 0xffffffff)
+        std::cout << "A dump will start at offset " << state.offset << "(0x" << int_to_hex(state.offset) << ").\n";
+        if (state.length == 0xffffffff)
           std::cout << "A dump will print untill the end of the given data.\n";
         else
-          std::cout << "A dump will print " << length << "(0x" << int_to_hex(length) << ") bytes.\n";
-        std::cout << "Interpreting the bytes as " << dump_type_to_str(dump_type) << ".\n";
-        std::cout << data_per_line << " interpreted values will be printed per row.\n";
+          std::cout << "A dump will print " << state.length << "(0x" << int_to_hex(state.length) << ") bytes.\n";
+        std::cout << "Interpreting the bytes as " << dump_type_to_str(state.dump_type) << ".\n";
+        std::cout << state.data_per_line << " interpreted values will be printed per row.\n";
         std::cout << "The input data is " << byte_arr.size() << " bytes long.\n";
       }
       else if (arguments[i] == "dump" || arguments[i] == "d")
@@ -634,12 +784,12 @@ void hex_interpret(const std::vector<uint8_t>& byte_arr)
       }
     }
     if (dump) {
-      auto it = byte_arr.begin() + offset;
+      auto it = byte_arr.begin() + state.offset;
       auto it_end = byte_arr.end();
-      if (length < byte_arr.size())
+      if (state.length < byte_arr.size())
       {
-        if ((uint64_t)length+(uint64_t)offset < byte_arr.size())
-          it_end = it + length;
+        if ((uint64_t)state.length+(uint64_t)state.offset < byte_arr.size())
+          it_end = it + state.length;
       }
       std::ofstream f;
       std::ostream* str = &std::cout;
@@ -649,38 +799,38 @@ void hex_interpret(const std::vector<uint8_t>& byte_arr)
         if (f.is_open())
           str = &f;
       }
-      uint32_t elements_per_row = data_per_line*size_of(dump_type);
-      switch (dump_type)
+      uint32_t elements_per_row = state.data_per_line*size_of(state.dump_type);
+      switch (state.dump_type)
       {
         case dumptype::dumptype_uint8:
-          print_byte_array(offset, it, it_end, TypeInterpreter<uint8_t>(little_endiann), elements_per_row, *str);
+          print_byte_array(state.offset, it, it_end, TypeInterpreter<uint8_t>(state.little_endiann), elements_per_row, *str);
           break;
         case dumptype::dumptype_int8:
-          print_byte_array(offset, it, it_end, TypeInterpreter<int8_t>(little_endiann), elements_per_row, *str);
+          print_byte_array(state.offset, it, it_end, TypeInterpreter<int8_t>(state.little_endiann), elements_per_row, *str);
           break;
         case dumptype::dumptype_uint16:
-          print_byte_array(offset, it, it_end, TypeInterpreter<uint16_t>(little_endiann), elements_per_row, *str);
+          print_byte_array(state.offset, it, it_end, TypeInterpreter<uint16_t>(state.little_endiann), elements_per_row, *str);
           break;
         case dumptype::dumptype_int16:
-          print_byte_array(offset, it, it_end, TypeInterpreter<int16_t>(little_endiann), elements_per_row, *str);
+          print_byte_array(state.offset, it, it_end, TypeInterpreter<int16_t>(state.little_endiann), elements_per_row, *str);
           break;
         case dumptype::dumptype_uint32:
-          print_byte_array(offset, it, it_end, TypeInterpreter<uint32_t>(little_endiann), elements_per_row, *str);
+          print_byte_array(state.offset, it, it_end, TypeInterpreter<uint32_t>(state.little_endiann), elements_per_row, *str);
           break;
         case dumptype::dumptype_int32:
-          print_byte_array(offset, it, it_end, TypeInterpreter<int32_t>(little_endiann), elements_per_row, *str);
+          print_byte_array(state.offset, it, it_end, TypeInterpreter<int32_t>(state.little_endiann), elements_per_row, *str);
           break;
         case dumptype::dumptype_uint64:
-          print_byte_array(offset, it, it_end, TypeInterpreter<uint64_t>(little_endiann), elements_per_row, *str);
+          print_byte_array(state.offset, it, it_end, TypeInterpreter<uint64_t>(state.little_endiann), elements_per_row, *str);
           break;
         case dumptype::dumptype_int64:
-          print_byte_array(offset, it, it_end, TypeInterpreter<int64_t>(little_endiann), elements_per_row, *str);
+          print_byte_array(state.offset, it, it_end, TypeInterpreter<int64_t>(state.little_endiann), elements_per_row, *str);
           break;
         case dumptype::dumptype_float:
-          print_byte_array(offset, it, it_end, TypeInterpreter<float>(little_endiann), elements_per_row, *str);
+          print_byte_array(state.offset, it, it_end, TypeInterpreter<float>(state.little_endiann), elements_per_row, *str);
           break;
         case dumptype::dumptype_double:
-          print_byte_array(offset, it, it_end, TypeInterpreter<double>(little_endiann), elements_per_row, *str);
+          print_byte_array(state.offset, it, it_end, TypeInterpreter<double>(state.little_endiann), elements_per_row, *str);
           break;
       }
       if (f.is_open())
